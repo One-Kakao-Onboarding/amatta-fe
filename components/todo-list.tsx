@@ -9,8 +9,7 @@ interface Todo {
   title: string
   url: string
   description?: string
-  ogImage?: string
-  favicon?: string
+  imageUrl?: string
   completed?: boolean
 }
 
@@ -20,6 +19,7 @@ interface ApiTodoResponse {
   discription: string
   link: string
   userId: number
+  imageUrl?: string
 }
 
 interface RecommendResponse {
@@ -28,6 +28,7 @@ interface RecommendResponse {
   link: string
   category: string
   price: number
+  imageUrl?: string
 }
 
 type SearchState = "idle" | "searching" | "found"
@@ -36,10 +37,15 @@ interface SearchResult {
   title: string
   url: string
   description: string
-  ogImage: string
-  favicon?: string
+  imageUrl?: string
   category: string
   price: number
+  taskOnly?: boolean
+}
+
+interface Message {
+  text: string
+  type: "user" | "system"
 }
 
 const API_BASE_URL = "https://amatta-api.goalmate.site"
@@ -53,10 +59,9 @@ export default function TodoList() {
   const [removingId, setRemovingId] = useState<number | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [inputText, setInputText] = useState("")
-  const [messages, setMessages] = useState<string[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
   const [showToast, setShowToast] = useState(false)
 
-  // [수정] 모바일 키보드 대응을 위한 뷰포트 높이 상태
   const [viewportHeight, setViewportHeight] = useState("100%")
 
   const suggestions = [
@@ -80,26 +85,30 @@ export default function TodoList() {
         const activeData: ApiTodoResponse[] = await activeTodosResponse.json()
         const completedData: ApiTodoResponse[] = await completedTodosResponse.json()
 
+        console.log("[v0] Active todos API response:", activeData)
+        console.log("[v0] Completed todos API response:", completedData)
+
         const mappedActiveTodos: Todo[] = activeData.map((item) => ({
           id: item.id,
           title: item.task,
           url: item.link,
           description: item.discription,
+          imageUrl: item.imageUrl,
         }))
+
+        console.log("[v0] Mapped active todos:", mappedActiveTodos)
 
         const mappedCompletedTodos: Todo[] = completedData.map((item) => ({
           id: item.id,
           title: item.task,
           url: item.link,
           description: item.discription,
+          imageUrl: item.imageUrl,
           completed: true,
         }))
 
-        const activeTodosWithImages = await fetchTodosWithDelay(mappedActiveTodos)
-        const completedTodosWithImages = await fetchTodosWithDelay(mappedCompletedTodos)
-
-        setActiveTodos(activeTodosWithImages)
-        setCompletedTodos(completedTodosWithImages)
+        setActiveTodos(mappedActiveTodos)
+        setCompletedTodos(mappedCompletedTodos)
       } catch (error) {
         console.error("[v0] Failed to fetch todos:", error)
       } finally {
@@ -110,9 +119,6 @@ export default function TodoList() {
     fetchTodos()
   }, [])
 
-  // [수정] Visual Viewport 감지 로직 추가
-  // 키보드가 올라오면 window.visualViewport.height가 줄어듭니다.
-  // 이 높이를 모달에 적용하여 입력창이 키보드 바로 위에 붙게 만듭니다.
   useEffect(() => {
     if (!isModalOpen || typeof window === "undefined" || !window.visualViewport) return
 
@@ -123,7 +129,6 @@ export default function TodoList() {
     window.visualViewport.addEventListener("resize", handleResize)
     window.visualViewport.addEventListener("scroll", handleResize)
 
-    // 초기 실행
     handleResize()
 
     return () => {
@@ -142,38 +147,11 @@ export default function TodoList() {
     return () => clearInterval(interval)
   }, [searchState])
 
-  async function fetchMetaImages(url: string): Promise<{ ogImage?: string; favicon?: string }> {
-    try {
-      const response = await fetch(`/api/og-image?url=${encodeURIComponent(url)}`)
-      const data = await response.json()
-      return { ogImage: data.ogImage, favicon: data.favicon }
-    } catch {
-      return {}
-    }
-  }
-
-  async function fetchTodosWithDelay(todos: Todo[]): Promise<Todo[]> {
-    const result = []
-    for (const todo of todos) {
-      try {
-        const images = await fetchMetaImages(todo.url)
-        result.push({ ...todo, ...images })
-      } catch {
-        result.push(todo)
-      }
-      // Add 200ms delay between requests to avoid rate limiting
-      await new Promise((resolve) => setTimeout(resolve, 200))
-    }
-    return result
-  }
-
   const handleCheckboxClick = async (todoId: number) => {
     if (activeTab === "active") {
-      // Mark as removing for animation
       setRemovingId(todoId)
 
       try {
-        // Call API to mark todo as complete
         const response = await fetch(`/api/todos?id=${todoId}`, {
           method: "PATCH",
         })
@@ -182,13 +160,10 @@ export default function TodoList() {
           throw new Error("Failed to complete todo")
         }
 
-        // Wait for animation to finish
         setTimeout(async () => {
-          // Remove from active todos
           setActiveTodos((prev) => prev.filter((todo) => todo.id !== todoId))
           setRemovingId(null)
 
-          // Refresh completed todos to show the newly completed item
           try {
             const completedResponse = await fetch(`/api/todos?userId=${USER_ID}&type=completion`)
             const completedData: ApiTodoResponse[] = await completedResponse.json()
@@ -197,23 +172,20 @@ export default function TodoList() {
               title: item.task,
               url: item.link,
               description: item.discription,
+              imageUrl: item.imageUrl,
               completed: true,
             }))
 
-            const completedTodosWithImages = await fetchTodosWithDelay(mappedCompletedTodos)
-
-            setCompletedTodos(completedTodosWithImages)
+            setCompletedTodos(mappedCompletedTodos)
           } catch (error) {
             console.error("[v0] Failed to refresh completed todos:", error)
           }
         }, 300)
       } catch (error) {
         console.error("[v0] Failed to complete todo:", error)
-        // Remove from removing state on error
         setRemovingId(null)
       }
     } else {
-      // For completed todos, just remove with animation (no API call needed)
       setRemovingId(todoId)
       setTimeout(() => {
         setCompletedTodos((prev) => prev.filter((todo) => todo.id !== todoId))
@@ -229,7 +201,7 @@ export default function TodoList() {
   const handleSend = async () => {
     if (inputText.trim()) {
       const userMessage = inputText.trim()
-      setMessages((prev) => [...prev, userMessage])
+      setMessages((prev) => [...prev, { text: userMessage, type: "user" }])
       setInputText("")
       setSearchState("searching")
       setDotCount(1)
@@ -237,24 +209,45 @@ export default function TodoList() {
       try {
         const response = await fetch(`/api/todos?userId=1&userInput=${encodeURIComponent(userMessage)}`)
 
+        if (response.status === 400) {
+          setMessages((prev) => [...prev, { text: "도와드리기 어려운 요청이에요🙏", type: "system" }])
+          setSearchState("idle")
+          return
+        }
+
+        if (response.status === 404) {
+          setMessages((prev) => [...prev, { text: "검색 결과가 없습니다", type: "system" }])
+          setSearchState("idle")
+          return
+        }
+
         if (!response.ok) {
           throw new Error("API request failed")
         }
 
         const data: RecommendResponse = await response.json()
 
-        // Fetch og:image and favicon for the link
-        const images = await fetchMetaImages(data.link)
-
-        setSearchResult({
-          title: data.task,
-          url: data.link,
-          description: data.description,
-          ogImage: images.ogImage,
-          favicon: images.favicon,
-          category: data.category,
-          price: data.price,
-        })
+        if (!data.link || !data.description) {
+          setSearchResult({
+            title: data.task,
+            url: "",
+            description: "",
+            imageUrl: "",
+            category: data.category || "",
+            price: 0,
+            taskOnly: true,
+          })
+        } else {
+          setSearchResult({
+            title: data.task,
+            url: data.link,
+            description: data.description,
+            imageUrl: data.imageUrl,
+            category: data.category,
+            price: data.price,
+            taskOnly: false,
+          })
+        }
         setSearchState("found")
       } catch (error) {
         console.error("[v0] Failed to fetch recommendation:", error)
@@ -267,24 +260,36 @@ export default function TodoList() {
     setSearchState("searching")
     setDotCount(1)
 
-    const lastMessage = messages[messages.length - 1]
-    if (lastMessage && searchResult) {
+    const lastUserMessage = [...messages].reverse().find((m) => m.type === "user")
+    if (lastUserMessage && searchResult) {
       try {
-        // Step 1: Exclude current product
-        await fetch("/api/todos", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            userId: 1,
-            category: searchResult.category,
-            link: searchResult.url,
-          }),
-        })
+        if (!searchResult.taskOnly) {
+          await fetch("/api/todos", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              userId: 1,
+              category: searchResult.category,
+              link: searchResult.url,
+            }),
+          })
+        }
 
-        // Step 2: Get new recommendation
-        const response = await fetch(`/api/todos?userId=1&userInput=${encodeURIComponent(lastMessage)}`)
+        const response = await fetch(`/api/todos?userId=1&userInput=${encodeURIComponent(lastUserMessage.text)}`)
+
+        if (response.status === 400) {
+          setMessages((prev) => [...prev, { text: "도와드리기 어려운 요청이에요🙏", type: "system" }])
+          setSearchState("idle")
+          return
+        }
+
+        if (response.status === 404) {
+          setMessages((prev) => [...prev, { text: "검색 결과가 없습니다", type: "system" }])
+          setSearchState("idle")
+          return
+        }
 
         if (!response.ok) {
           throw new Error("API request failed")
@@ -292,18 +297,27 @@ export default function TodoList() {
 
         const data: RecommendResponse = await response.json()
 
-        // Fetch og:image and favicon for the link
-        const images = await fetchMetaImages(data.link)
-
-        setSearchResult({
-          title: data.task,
-          url: data.link,
-          description: data.description,
-          ogImage: images.ogImage,
-          favicon: images.favicon,
-          category: data.category,
-          price: data.price,
-        })
+        if (!data.link || !data.description) {
+          setSearchResult({
+            title: data.task,
+            url: "",
+            description: "",
+            imageUrl: "",
+            category: data.category || "",
+            price: 0,
+            taskOnly: true,
+          })
+        } else {
+          setSearchResult({
+            title: data.task,
+            url: data.link,
+            description: data.description,
+            imageUrl: data.imageUrl,
+            category: data.category,
+            price: data.price,
+            taskOnly: false,
+          })
+        }
         setSearchState("found")
       } catch (error) {
         console.error("[v0] Failed to fetch recommendation:", error)
@@ -315,33 +329,38 @@ export default function TodoList() {
   const handleAddTodo = async () => {
     if (searchResult) {
       try {
-        // Add single product to server
+        const requestBody = searchResult.taskOnly
+          ? {
+              action: "add",
+              task: searchResult.title,
+              userId: 1,
+            }
+          : {
+              action: "add",
+              task: searchResult.title,
+              link: searchResult.url,
+              discription: searchResult.description,
+              userId: 1,
+              imageUrl: searchResult.imageUrl,
+            }
+
         await fetch("/api/todos", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            action: "add",
-            task: searchResult.title,
-            link: searchResult.url,
-            discription: searchResult.description,
-            userId: 1,
-          }),
+          body: JSON.stringify(requestBody),
         })
 
-        // Close modal and reset states
         setIsModalOpen(false)
         setInputText("")
         setMessages([])
         setSearchState("idle")
         setSearchResult(null)
 
-        // Show toast
         setShowToast(true)
         setTimeout(() => setShowToast(false), 2000)
 
-        // Refresh todos list
         const todosResponse = await fetch("/api/todos?userId=1&type=uncompletion")
         if (todosResponse.ok) {
           const data: ApiTodoResponse[] = await todosResponse.json()
@@ -350,11 +369,10 @@ export default function TodoList() {
             title: item.task,
             url: item.link,
             description: item.discription,
+            imageUrl: item.imageUrl,
           }))
 
-          const todosWithImages = await fetchTodosWithDelay(mappedTodos)
-
-          setActiveTodos(todosWithImages)
+          setActiveTodos(mappedTodos)
         }
       } catch (error) {
         console.error("[v0] Failed to add todos:", error)
@@ -446,36 +464,28 @@ export default function TodoList() {
                       <div className="flex-1 min-w-0 flex flex-col justify-between">
                         <h3 className="text-lg font-medium text-gray-900 mb-2">{todo.title}</h3>
 
-                        <a
-                          href={todo.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-3 py-2 hover:bg-gray-200 rounded-full text-sm text-gray-700 whitespace-nowrap w-fit"
-                          style={{ backgroundColor: isCompleted ? "white" : "#F3F4F5" }}
-                        >
-                          {todo.favicon ? (
-                            <div className="w-5 h-5 rounded-full overflow-hidden bg-white flex items-center justify-center flex-shrink-0">
-                              <img
-                                src={todo.favicon || "/placeholder.svg"}
-                                alt=""
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                          ) : (
+                        {!isCompleted && todo.url && (
+                          <a
+                            href={todo.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 px-3 py-2 hover:bg-gray-200 rounded-full text-sm text-gray-700 whitespace-nowrap w-fit"
+                            style={{ backgroundColor: isCompleted ? "white" : "#F3F4F5" }}
+                          >
                             <div className="w-5 h-5 rounded-full bg-[#06C755] flex items-center justify-center flex-shrink-0">
                               <span className="text-white text-xs font-bold">N</span>
                             </div>
-                          )}
-                          <span className="font-medium">추천 상품 바로가기</span>
-                          <ChevronRight className="w-4 h-4 flex-shrink-0" />
-                        </a>
+                            <span className="font-medium">추천 상품 바로가기</span>
+                            <ChevronRight className="w-4 h-4 flex-shrink-0" />
+                          </a>
+                        )}
                       </div>
 
-                      {todo.ogImage && (
+                      {todo.imageUrl && (
                         <div className="flex-shrink-0">
                           <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100">
                             <img
-                              src={todo.ogImage || "/placeholder.svg"}
+                              src={todo.imageUrl || "/placeholder.svg"}
                               alt={todo.title}
                               className="w-full h-full object-cover"
                             />
@@ -566,14 +576,15 @@ export default function TodoList() {
                       className="w-[130px] h-auto"
                     />
                   </div>
-                  <h1 className="text-xl font-bold text-gray-900 mb-1">해야 할 것을 적으면</h1>
-                  <h2 className="text-xl font-bold text-gray-900 mb-6">맞춤형으로 추천해드릴게요!</h2>
-                  <div className="flex flex-col gap-3 pb-4">
+                  <h1 className="text-xl font-bold text-gray-900 mb-1">해야 할 것을 적으면 </h1>
+                  <p className="text-xl font-bold text-gray-900 mb-6">맞춤형으로 추천해드릴게요!</p>
+
+                  <div className="flex flex-wrap gap-2">
                     {suggestions.map((suggestion, index) => (
                       <button
                         key={index}
                         onClick={() => handleSuggestionClick(suggestion.text)}
-                        className="inline-flex items-center gap-2 px-4 py-3 rounded-full font-medium shadow-sm hover:opacity-90 transition-opacity w-fit"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm"
                         style={{ backgroundColor: "#F0F8FF", color: "#1D8FFF" }}
                       >
                         <span>{suggestion.emoji}</span>
@@ -585,19 +596,24 @@ export default function TodoList() {
               )}
 
               {messages.length > 0 && (
-                <div className="flex flex-col gap-3 pb-4">
-                  {messages.map((message, index) => (
-                    <div key={index} className="flex justify-end">
-                      <div className="px-4 py-3 rounded-2xl max-w-[80%]" style={{ backgroundColor: "#E9ECEF" }}>
-                        <span className="text-gray-900">{message}</span>
+                <div className="flex flex-col gap-3">
+                  {messages.map((msg, index) => (
+                    <div key={index} className={`flex ${msg.type === "user" ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className="px-4 py-2 rounded-2xl max-w-[80%]"
+                        style={{ backgroundColor: msg.type === "user" ? "#E9ECEF" : "white" }}
+                      >
+                        <span className="text-sm" style={{ color: msg.type === "user" ? "#1F2937" : "#369BFD" }}>
+                          {msg.text}
+                        </span>
                       </div>
                     </div>
                   ))}
 
                   {searchState === "searching" && (
                     <div className="flex justify-start">
-                      <div className="px-4 py-2 rounded-full bg-white shadow-sm">
-                        <span className="font-medium" style={{ color: "#369BFD" }}>
+                      <div className="px-4 py-2 rounded-2xl" style={{ backgroundColor: "white" }}>
+                        <span style={{ color: "#369BFD" }} className="font-medium text-sm">
                           찾는 중{".".repeat(dotCount)}
                         </span>
                       </div>
@@ -605,127 +621,151 @@ export default function TodoList() {
                   )}
 
                   {searchState === "found" && searchResult && (
-                    <>
+                    <div className="flex flex-col gap-3">
                       <div className="flex justify-start">
-                        <div className="px-4 py-2 rounded-full bg-white shadow-sm">
-                          <span className="font-medium" style={{ color: "#369BFD" }}>
+                        <div className="px-4 py-2 rounded-2xl" style={{ backgroundColor: "white" }}>
+                          <span style={{ color: "#369BFD" }} className="font-medium text-sm">
                             찾기 완료!
                           </span>
                         </div>
                       </div>
 
-                      <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm mt-2">
-                        <div className="flex gap-3">
-                          <div className="flex-1 min-w-0 flex flex-col justify-between">
-                            <h3 className="text-lg font-medium text-gray-900 mb-2">{searchResult.title}</h3>
-
-                            <a
-                              href={searchResult.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-2 px-3 py-2 hover:bg-gray-200 rounded-full text-sm text-gray-700 whitespace-nowrap w-fit"
-                              style={{ backgroundColor: "#F3F4F5" }}
+                      {searchResult.taskOnly ? (
+                        <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: "white" }}>
+                          <h3 className="text-lg font-medium text-gray-900 mb-4">{searchResult.title}</h3>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleRetry}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-full text-sm font-medium transition-all active:scale-95 active:shadow-inner hover:shadow-md"
+                              style={{ backgroundColor: "#EEEEEF" }}
                             >
-                              {searchResult.favicon ? (
-                                <div className="w-5 h-5 rounded-full overflow-hidden bg-white flex items-center justify-center flex-shrink-0">
-                                  <img
-                                    src={searchResult.favicon || "/placeholder.svg"}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                  />
-                                </div>
-                              ) : (
+                              <Image src="/retry-icon.svg" alt="다시" width={16} height={16} />
+                              <span className="whitespace-nowrap">다시 추천받기</span>
+                            </button>
+                            <button
+                              onClick={handleAddTodo}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-full text-sm font-medium transition-all active:scale-95 active:shadow-inner hover:shadow-lg"
+                              style={{ backgroundColor: "#FFE200" }}
+                            >
+                              <Image src="/add-todo-icon.svg" alt="추가" width={16} height={16} />
+                              <span className="whitespace-nowrap">할 일 추가하기</span>
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: "white" }}>
+                          <div className="flex gap-3">
+                            <div className="flex-1 min-w-0 flex flex-col">
+                              <h3 className="text-lg font-medium text-gray-900 mb-2">{searchResult.title}</h3>
+
+                              <a
+                                href={searchResult.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 px-3 py-2 hover:bg-gray-200 rounded-full text-sm text-gray-700 whitespace-nowrap w-fit"
+                                style={{ backgroundColor: "#F3F4F5" }}
+                              >
                                 <div className="w-5 h-5 rounded-full bg-[#06C755] flex items-center justify-center flex-shrink-0">
                                   <span className="text-white text-xs font-bold">N</span>
                                 </div>
-                              )}
-                              <span className="font-medium">추천 상품 바로가기</span>
-                              <ChevronRight className="w-4 h-4 flex-shrink-0" />
-                            </a>
-                          </div>
-
-                          <div className="flex-shrink-0">
-                            <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100">
-                              <img
-                                src={searchResult.ogImage || "/placeholder.svg"}
-                                alt={searchResult.title}
-                                className="w-full h-full object-cover"
-                              />
+                                <span className="font-medium">추천 상품 바로가기</span>
+                                <ChevronRight className="w-4 h-4 flex-shrink-0" />
+                              </a>
                             </div>
+
+                            {searchResult.imageUrl && (
+                              <div className="flex-shrink-0">
+                                <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100">
+                                  <img
+                                    src={searchResult.imageUrl || "/placeholder.svg"}
+                                    alt={searchResult.title}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {searchResult.description && (
+                            <div
+                              className="relative rounded-2xl p-2 mt-3"
+                              style={{
+                                border: "2px solid transparent",
+                                backgroundImage:
+                                  "linear-gradient(white, white), linear-gradient(to right, #FFB1D5, #FFAA97)",
+                                backgroundOrigin: "border-box",
+                                backgroundClip: "padding-box, border-box",
+                              }}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Image
+                                  src="/kanana-icon.svg"
+                                  alt="kanana"
+                                  width={16}
+                                  height={16}
+                                  className="flex-shrink-0"
+                                />
+                                <span className="text-gray-900 text-sm truncate">{searchResult.description}</span>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex gap-2 mt-4">
+                            <button
+                              onClick={handleRetry}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-full text-sm font-medium transition-all active:scale-95 active:shadow-inner hover:shadow-md"
+                              style={{ backgroundColor: "#EEEEEF" }}
+                            >
+                              <Image src="/retry-icon.svg" alt="다시" width={16} height={16} />
+                              <span className="whitespace-nowrap">다시 추천받기</span>
+                            </button>
+                            <button
+                              onClick={handleAddTodo}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-3 rounded-full text-sm font-medium transition-all active:scale-95 active:shadow-inner hover:shadow-lg"
+                              style={{ backgroundColor: "#FFE200" }}
+                            >
+                              <Image src="/add-todo-icon.svg" alt="추가" width={16} height={16} />
+                              <span className="whitespace-nowrap">할 일 추가하기</span>
+                            </button>
                           </div>
                         </div>
-
-                        <div
-                          className="relative rounded-2xl p-2 mt-3"
-                          style={{
-                            border: "2px solid transparent",
-                            backgroundImage:
-                              "linear-gradient(white, white), linear-gradient(to right, #FFB1D5, #FFAA97)",
-                            backgroundOrigin: "border-box",
-                            backgroundClip: "padding-box, border-box",
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <Image
-                              src="/kanana-icon.svg"
-                              alt="kanana"
-                              width={16}
-                              height={16}
-                              className="flex-shrink-0"
-                            />
-                            <span className="text-gray-900 text-sm truncate">{searchResult.description}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex gap-3 mt-4">
-                          <button
-                            onClick={handleRetry}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-full transition-all whitespace-nowrap active:scale-95 active:shadow-inner hover:shadow-md cursor-pointer"
-                            style={{ backgroundColor: "#EEEEEF" }}
-                          >
-                            <Image src="/retry-icon.svg" alt="다시" width={16} height={16} />
-                            <span className="font-medium text-gray-700 text-sm">다시 추천받기</span>
-                          </button>
-
-                          <button
-                            onClick={handleAddTodo}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-full shadow-sm transition-all whitespace-nowrap active:scale-95 active:shadow-inner hover:shadow-lg cursor-pointer"
-                            style={{ backgroundColor: "#FFE200" }}
-                          >
-                            <Image src="/add-todo-icon.svg" alt="추가" width={16} height={16} />
-                            <span className="font-semibold text-gray-900 text-sm">할 일 추가하기</span>
-                          </button>
-                        </div>
-                      </div>
-                    </>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
             </div>
 
-            <div className="flex-shrink-0 px-4 pb-6 pt-2">
+            <div
+              className="absolute bottom-[#FFFDF2] left-1/4 w-64 h-64 rounded-full opacity-70 pointer-events-none"
+              style={{ backgroundColor: "#FFFDF2", filter: "blur(60px)" }}
+            />
+            <div
+              className="absolute bottom-0 right-1/4 w-64 h-64 rounded-full opacity-70 pointer-events-none"
+              style={{ backgroundColor: "#F2FCFF", filter: "blur(60px)" }}
+            />
+
+            <div className="p-4 flex-shrink-0">
               <div
-                className="relative bg-white rounded-2xl shadow-lg overflow-hidden"
+                className="relative rounded-3xl p-1"
                 style={{
-                  border: "2px solid transparent",
-                  backgroundImage: "linear-gradient(white, white), linear-gradient(to right, #68E0F4, #2781FF)",
-                  backgroundOrigin: "border-box",
-                  backgroundClip: "padding-box, border-box",
+                  background: "linear-gradient(to right, #68E0F4, #2781FF)",
                 }}
               >
-                <textarea
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  placeholder="사야할 것, 해야할 것 모두 적어보세요"
-                  className="w-full p-4 pr-16 min-h-[80px] resize-none border-none outline-none text-gray-900 placeholder:text-gray-400"
-                  rows={2}
-                />
-                <button
-                  onClick={handleSend}
-                  className="absolute bottom-4 right-4 w-12 h-12 flex items-center justify-center transition-opacity hover:opacity-90"
-                >
-                  <Image src="/send-button.svg" alt="전송" width={48} height={48} />
-                </button>
+                <div className="bg-white rounded-3xl flex items-center gap-2 px-4 py-3">
+                  <input
+                    type="text"
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                    onKeyPress={(e) => e.key === "Enter" && handleSend()}
+                    placeholder="사야할 것, 해야할 것 모두 적어보세요"
+                    className="flex-1 text-sm text-gray-900 placeholder-gray-400 outline-none bg-transparent"
+                    style={{ fontSize: "14px" }}
+                  />
+                  <button onClick={handleSend} className="flex-shrink-0">
+                    <Image src="/send-button.svg" alt="전송" width={32} height={32} />
+                  </button>
+                </div>
               </div>
             </div>
           </div>

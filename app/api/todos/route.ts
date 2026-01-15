@@ -26,6 +26,10 @@ export async function GET(request: Request) {
     })
 
     if (!response.ok) {
+      if (userInput) {
+        // For recommend API, pass through the actual status code
+        return NextResponse.json({ error: "API error" }, { status: response.status })
+      }
       throw new Error(`API responded with status: ${response.status}`)
     }
 
@@ -72,13 +76,13 @@ export async function POST(request: Request) {
 
     if (action === "add") {
       // Add todo API
-      const { task, discription, link, userId } = body
+      const { task, discription, link, userId, imageUrl } = body
       const response = await fetch(`${API_BASE_URL}/api/todos`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ task, discription, link, userId }),
+        body: JSON.stringify({ task, discription, link, userId, imageUrl }),
       })
 
       if (!response.ok) {
